@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="zh-Hant">
+
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Cart</title>
+    <link rel="stylesheet" href="assets/styles.css">
+    <style>
+        .cart-line {
+            padding: 12px;
+            background: #e9e9e9;
+            border-radius: 10px;
+            margin-top: 10px
+        }
+
+        .layout {
+            display: grid;
+            grid-template-columns: 1fr 260px;
+            gap: 16px
+        }
+
+        @media (max-width: 800px) {
+            .layout {
+                grid-template-columns: 1fr
+            }
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <!-- 頂部：TAB + 搜尋欄 -->
+        <div class="header">
+            <div class="tabs">
+                <a class="tab" href="product.html">商品頁</a>
+            </div>
+            <div class="tabs">
+                <a class="tab" href="shoppingCart.html">購物車</a>
+            </div>
+            <div class="tabs">
+                <a class="tab" href="order.html">訂單頁</a>
+            </div>
+        </div>
+
+
+        <h3 style="margin:18px 0 6px">我的購物車</h3>
+        <div id="lines"></div>
+
+        <div class="card" style="margin-top:16px">
+            <div class="layout">
+                <!-- 左：買家資料 -->
+                <form id="form" class="grid">
+                    <label>姓名 <input class="input" name="buyerName" required></label>
+                    <label>地址 <input class="input" name="address" required></label>
+                    <label>手機 <input class="input" name="phone"></label>
+                    <label>Email <input class="input" name="email" type="email" required></label>
+                </form>
+                <!-- 右：金額 -->
+                <div>
+                    <div class="card">商品，數量，金額</div>
+                    <div class="space-between" style="margin-top:10px">
+                        <div class="price">總金額 <span id="total">NT$ 0</span></div>
+                        <button id="submit" class="btn">送出訂單</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div id="result" class="card" style="margin-top:16px;display:none"></div>
+    </div>
+
+    <script>
+        const CART_KEY = "app_cart";
+        const cart = JSON.parse(localStorage.getItem(CART_KEY) || "[]");
+        const $ = s => document.querySelector(s);
+        const lines = $("#lines"), totalEl = $("#total"), form = $("#form"), submit = $("#submit"), result = $("#result");
+
+        function render() {
+            if (cart.length === 0) {
+                lines.innerHTML = `<div class="muted">購物車是空的</div>`;
+                totalEl.textContent = "NT$ 0";
+                submit.disabled = true;
+                return;
+            }
+            lines.innerHTML = cart.map(x =>
+                `<div class="cart-line">
+                    商品：${x.productName}， 
+                    數量：${x.quantity}， 
+                    金額：NT$ ${(x.unitPrice * x.quantity).toLocaleString()}
+                </div>`).join("");
+            const total = cart.reduce((s, x) => s + x.unitPrice * x.quantity, 0);
+            totalEl.textContent = "NT$ " + total.toLocaleString();
+        }
+        render();
+
+        // Mock「建立訂單」→ 產生 orderId，清空購物車，寫入 LocalStorage
+        submit.addEventListener("click", (e) => {
+            e.preventDefault();
+            if (cart.length === 0) { alert("購物車是空的"); return; }
+            const fd = new FormData(form);
+            const orderId = "O" + Date.now();
+            const orderCode = Math.random().toString(36).slice(2, 8).toUpperCase();
+            const items = cart.map(i => ({ 
+                productId: i.productId, 
+                productName: i.productName, 
+                unitPrice: i.unitPrice, 
+                quantity: i.quantity }));
+                
+            // 存 LocalStorage
+            localStorage.setItem("orderId", orderId);
+            localStorage.setItem("lastOrder", JSON.stringify({ orderId, orderCode, status: "ordered", items }));
+            // 清空購物車
+            localStorage.setItem(CART_KEY, "[]");
+
+            result.style.display = "block";
+            result.innerHTML = `
+            <div>訂單已建立！</div>
+            <div>訂單編號：<strong>${orderId}</strong></div>
+            <div style="margin-top:10px"><a class="btn" href="order.html?orderId=${encodeURIComponent(orderId)}">前往訂單頁</a></div>`;
+            render();
+        });
+    </script>
+</body>
+
+</html>

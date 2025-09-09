@@ -1,0 +1,292 @@
+<!doctype html>
+<html lang="zh-Hant">
+
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>訂單</title>
+  <link rel="stylesheet" href="assets/styles.css" />
+  <style>
+    table {
+      width: 100%;
+      border-collapse: collapse
+    }
+
+    th,
+    td {
+      padding: 8px;
+      border-bottom: 1px solid var(--border);
+      text-align: left
+    }
+
+    tfoot td {
+      font-weight: 800
+    }
+
+    .qty {
+      width: 80px
+    }
+  </style>
+</head>
+
+<body>
+  <div class="container">
+    <!-- 頂部：TAB + 搜尋欄 -->
+    <div class="header">
+      <div class="tabs">
+        <a class="tab" href="product.html">商品頁</a>
+      </div>
+      <div class="tabs">
+        <a class="tab" href="shoppingCart.html">購物車</a>
+      </div>
+      <div class="tabs">
+        <a class="tab" href="order.html">訂單頁</a>
+      </div>
+    </div>
+  </div>
+
+  <main class="container grid" style="grid-template-columns:1fr 380px">
+    <section class="card">
+      <div class="space-between">
+        <h2 style="margin:0;font-size:16px">訂單內容</h2>
+        <div class="row">
+          <input id="orderIdInput" class="input" placeholder="orderId（預設由 LocalStorage 帶入）" style="width:260px">
+          <button id="load" class="btn">查詢</button>
+        </div>
+      </div>
+      <div id="info" class="muted" style="margin-top:8px">尚未載入</div>
+      <div id="itemsWrap" class="card hidden" style="margin-top:12px">
+        <table id="itemsTbl">
+          <thead>
+            <tr>
+              <th>商品</th>
+              <th>單價</th>
+              <th>數量</th>
+              <th>小計</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+          <tfoot>
+            <tr>
+              <td colspan="3">總計</td>
+              <td id="totalCell">NT$ 0</td>
+            </tr>
+          </tfoot>
+        </table>
+        <small class="muted">* 將數量調整為 0 代表刪除該品項（僅限 ordered）。</small>
+      </div>
+    </section>
+
+    <aside class="grid" style="grid-template-columns:1fr;align-content:start;gap:16px">
+      <section class="card">
+        <h3 style="margin:0 0 8px;font-size:15px">動作</h3>
+        <div id="actionWrap" class="grid" style="grid-template-columns:1fr">
+          <button id="save" class="btn" disabled>修改訂單</button>
+          <button id="complete" class="btn" disabled>完成訂單</button>
+          <button id="delete" class="btn" disabled>刪除訂單</button>
+        </div>
+      </section>
+
+      <section class="card">
+        <h3 style="margin:0 0 8px;font-size:15px">新增評論（完成訂單才能評）</h3>
+        <form id="reviewForm" class="grid" style="grid-template-columns:1fr">
+          <label>內容<textarea class="input" name="content" rows="3" placeholder="寫下你的心得…"></textarea></label>
+          <button class="btn">送出評論</button>
+        </form>
+        <div id="reviewResult" class="muted" style="margin-top:8px"></div>
+      </section>
+    </aside>
+  </main>
+
+  <script>
+    const USE_MOCK = true; const BASE = "/api/v1";
+    const $ = s => document.querySelector(s);
+
+    const orderIdInput = $("#orderIdInput"), loadBtn = $("#load");
+    const infoEl = $("#info"), itemsWrap = $("#itemsWrap"), itemsTbody = $("#itemsTbl tbody"), totalCell = $("#totalCell");
+    const saveBtn = $("#save"), completeBtn = $("#complete"), deleteBtn = $("#delete");
+    const reviewForm = $("#reviewForm"), reviewResult = $("#reviewResult");
+
+    let currentOrder = null; 
+    let qtyDraft = new Map(); // productId -> newQty
+
+    // 從 LocalStorage 預填
+    const lsOrderId = localStorage.getItem("orderId");
+    if (lsOrderId) orderIdInput.value = lsOrderId;
+
+    loadBtn.addEventListener("click", () => loadOrder());
+    saveBtn.addEventListener("click", () => updateOrder());
+    completeBtn.addEventListener("click", () => completeOrder());
+    deleteBtn.addEventListener("click", () => deleteOrder());
+
+    reviewForm.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      if (!currentOrder) { alert("請先查詢訂單"); return; }
+      const fd = new FormData(reviewForm);
+      const payload = {
+        orderId: currentOrder.orderId,
+        content: String(fd.get("content") || "")
+      };
+      const productId = Number(fd.get("productId"));
+      const j = USE_MOCK ? await mockAddReview(productId, payload) : await addReview(productId, payload);
+      reviewResult.textContent = j.returnCode === "0000" ? "評論已送出" : "送出失敗：" + j.returnMsg;
+    });
+
+    // 初次自動載入
+    if (lsOrderId) loadOrder();
+
+    // 查詢單筆訂單
+    async function loadOrder() {
+      const id = orderIdInput.value.trim();
+      if (!id) { alert("請輸入 orderId"); return; }
+      const j = USE_MOCK ? await mockGet(id) : await queryOrder(id);
+      if (j.returnCode !== "0000") { alert("查詢失敗：" + j.returnMsg); return; }
+      currentOrder = j.data; qtyDraft.clear();
+      renderOrder(j.data);
+    }
+
+    function renderOrder(d) {
+      infoEl.innerHTML = `
+      <div>orderId：<strong>${d.orderId}</strong></div>
+      <div>狀態：<strong>${d.status}</strong></div>
+      <div class="muted">${new Date(d.createTime || Date.now()).toLocaleString()}</div>`;
+      itemsWrap.classList.remove("hidden");
+      itemsTbody.innerHTML = "";
+      let sum = 0;
+      for (const it of d.items) {
+        const tr = document.createElement("tr");
+        sum += it.lineAmount;
+        tr.innerHTML = `
+        <td>${escapeHTML(it.productName)} <span class="muted">#${it.productId}</span></td>
+        <td>NT$ ${it.unitPrice.toLocaleString()}</td>
+        <td><input class="input qty" type="number" min="0" max="99" value="${it.quantity}" data-id="${it.productId}" ${d.status !== "ordered" ? "disabled" : ""} /></td>
+        <td>NT$ ${(it.unitPrice * it.quantity).toLocaleString()}</td>
+      `;
+        itemsTbody.appendChild(tr);
+      }
+      totalCell.textContent = "NT$ " + sum.toLocaleString();
+
+      // 綁定輸入事件
+      itemsTbody.querySelectorAll(".qty").forEach(inp => {
+        inp.addEventListener("change", (e) => {
+          const id = Number(e.target.dataset.id);
+          qtyDraft.set(id, clamp(Number(e.target.value || 0), 0, 99));
+          saveBtn.disabled = false;
+        });
+      });
+
+      // 動作按鈕
+      const ordered = d.status === "ordered";
+      saveBtn.disabled = !ordered;
+      completeBtn.disabled = !ordered;
+      deleteBtn.disabled = d.status === "completed"; // completed 禁刪
+    }
+
+    async function updateOrder() {
+      if (!currentOrder) return;
+      const items = currentOrder.items.map(it => {
+        const newQty = qtyDraft.has(it.productId) ? qtyDraft.get(it.productId) : it.quantity;
+        return { productId: it.productId, quantity: newQty };
+      });
+      const payload = { code: getCode(), items };
+      const j = USE_MOCK ? await mockPatch(currentOrder.orderId, payload) : await editOrder(currentOrder.orderId, payload);
+      if (j.returnCode !== "0000") { alert("更新失敗：" + j.returnMsg); return; }
+      qtyDraft.clear(); saveBtn.disabled = true;
+      currentOrder = Object.assign({}, currentOrder, j.data);
+      // 重新查詢以取得正確金額與品項
+      await loadOrder();
+    }
+
+    async function completeOrder() {
+      if (!currentOrder) return;
+      const j = USE_MOCK ? await mockComplete(currentOrder.orderId, getCode()) : await completeOrder(currentOrder.orderId, getCode());
+      if (j.returnCode !== "0000") { alert("完成失敗：" + j.returnMsg); return; }
+      await loadOrder();
+    }
+
+    async function deleteOrder() {
+      if (!currentOrder) return;
+      if (!confirm("確認刪除此訂單？")) return;
+      const j = USE_MOCK ? await mockDelete(currentOrder.orderId, getCode()) : await deleteOrder(currentOrder.orderId, getCode());
+      if (j.returnCode !== "0000") { alert("刪除失敗：" + j.returnMsg); return; }
+      alert("已刪除"); currentOrder = null; itemsWrap.classList.add("hidden"); infoEl.textContent = "已刪除";
+    }
+
+    // === 真 API ===
+    // TODO: 搜尋單筆訂單 api/queryOrder
+    async function queryOrder(orderId, code) {
+      const r = await fetch(`${BASE}/orders/${orderId}?code=${encodeURIComponent(code)}`);
+      return await r.json();
+    }
+
+    // TODO: 編輯訂單 api/editOrder
+    async function editOrder(orderId, payload) {
+      const r = await fetch(`${BASE}/orders/${orderId}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
+      return await r.json();
+    }
+
+    // TODO: 完成訂單 api/completeOrder
+    async function completeOrder(orderId, code) {
+      const r = await fetch(`${BASE}/orders/${orderId}/complete`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ code }) });
+      return await r.json();
+    }
+
+    // TODO: 刪除訂單 api/deleteOrder
+    async function deleteOrder(orderId, code) {
+      const r = await fetch(`${BASE}/orders/${orderId}`, { method: "DELETE", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ code }) });
+      return await r.json();
+    }
+
+    // TODO: 新增訂單評論 api/createReview
+    async function addReview(productId, payload) {
+      const r = await fetch(`${BASE}/products/${productId}/reviews`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
+      return await r.json();
+    }
+
+    // === Mock API（示意）===
+    async function mockGet(orderId) {
+      await wait(200);
+      return {
+        returnCode: "0000", returnMsg: "OK",
+        data: {
+          orderId, status: window.__mockStatus || "ordered",
+          buyer: { buyerName: "王小明", email: "ming@example.com" },
+          items: [
+            { productId: 1001, productName: "USB-C Hub", unitPrice: 1299, quantity: 2, lineAmount: 2598 },
+            { productId: 1005, productName: "HDMI Cable", unitPrice: 299, quantity: 1, lineAmount: 299 }
+          ],
+          totalAmount: 2897,
+          createTime: new Date(Date.now() - 3600e3).toISOString()
+        }
+      };
+    }
+    async function mockPatch(orderId, payload) {
+      await wait(250);
+      const items = payload.items.filter(x => x.quantity > 0).map(x => {
+        const price = x.productId === 1005 ? 299 : 1299;
+        return { productId: x.productId, productName: x.productId === 1005 ? "HDMI Cable" : "USB-C Hub", unitPrice: price, quantity: x.quantity, lineAmount: price * x.quantity };
+      });
+      const totalAmount = items.reduce((s, x) => s + x.lineAmount, 0);
+      if (window.__mockStatus === "completed") return { returnCode: "O006", returnMsg: "已完成不可修改" };
+      return { returnCode: "0000", returnMsg: "Order updated", data: { orderId, status: items.length ? "ordered" : "cancelled", items, totalAmount, updateTime: new Date().toISOString() } };
+    }
+    async function mockComplete(orderId, code) { await wait(200); window.__mockStatus = "completed"; return { returnCode: "0000", returnMsg: "Order completed" }; }
+    async function mockDelete(orderId, code) {
+      await wait(200);
+      if (window.__mockStatus === "completed") return { returnCode: "O008", returnMsg: "已完成不可刪除" };
+      return { returnCode: "0000", returnMsg: "Order deleted" };
+    }
+    async function mockAddReview(productId, payload) {
+      await wait(200);
+      if (window.__mockStatus !== "completed") return { returnCode: "R002", returnMsg: "未完成訂單不可評論" };
+      return { returnCode: "0000", returnMsg: "Review added", data: { reviewId: "RV" + Date.now(), createTime: new Date().toISOString() } };
+    }
+
+    // 工具
+    function wait(ms) { return new Promise(r => setTimeout(r, ms)); }
+    function clamp(n, min, max) { return Math.max(min, Math.min(max, n)); }
+    function escapeHTML(s) { return String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;", "'": "&#39;" }[c])); }
+  </script>
+</body>
+
+</html>
