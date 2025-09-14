@@ -43,10 +43,8 @@
             </div>
         </div>
 
-
         <h3 style="margin:18px 0 6px">我的購物車</h3>
         <div id="lines"></div>
-
         <div class="card" style="margin-top:16px">
             <div class="layout">
                 <!-- 左：買家資料 -->
@@ -58,7 +56,6 @@
                 </form>
                 <!-- 右：金額 -->
                 <div>
-                    <div class="card">商品，數量，金額</div>
                     <div class="space-between" style="margin-top:10px">
                         <div class="price">總金額 <span id="total">NT$ 0</span></div>
                         <button id="submit" class="btn">送出訂單</button>
@@ -66,15 +63,17 @@
                 </div>
             </div>
         </div>
-
         <div id="result" class="card" style="margin-top:16px;display:none"></div>
     </div>
 
     <script>
         const CART_KEY = "app_cart";
         const cart = JSON.parse(localStorage.getItem(CART_KEY) || "[]");
-        const $ = s => document.querySelector(s);
-        const lines = $("#lines"), totalEl = $("#total"), form = $("#form"), submit = $("#submit"), result = $("#result");
+        const lines = document.querySelector("#lines");
+        const totalEl = document.querySelector("#total");
+        const form = document.querySelector("#form");
+        const submit = document.querySelector("#submit");
+        const result = document.querySelector("#result");
 
         function render() {
             if (cart.length === 0) {
@@ -94,31 +93,52 @@
         }
         render();
 
-        // Mock「建立訂單」→ 產生 orderId，清空購物車，寫入 LocalStorage
-        submit.addEventListener("click", (e) => {
+        // 「建立訂單」→ 產生 orderId，清空購物車，寫入 LocalStorage
+        submit.addEventListener("click", async (e) => {
             e.preventDefault();
-            if (cart.length === 0) { alert("購物車是空的"); return; }
-            const fd = new FormData(form);
-            const orderId = "O" + Date.now();
-            const orderCode = Math.random().toString(36).slice(2, 8).toUpperCase();
-            const items = cart.map(i => ({ 
-                productId: i.productId, 
-                productName: i.productName, 
-                unitPrice: i.unitPrice, 
-                quantity: i.quantity }));
-                
-            // 存 LocalStorage
-            localStorage.setItem("orderId", orderId);
-            localStorage.setItem("lastOrder", JSON.stringify({ orderId, orderCode, status: "ordered", items }));
-            // 清空購物車
-            localStorage.setItem(CART_KEY, "[]");
-
-            result.style.display = "block";
-            result.innerHTML = `
-            <div>訂單已建立！</div>
-            <div>訂單編號：<strong>${orderId}</strong></div>
-            <div style="margin-top:10px"><a class="btn" href="order.html?orderId=${encodeURIComponent(orderId)}">前往訂單頁</a></div>`;
-            render();
+            if (cart.length === 0) { 
+                alert("購物車是空的"); 
+                return; 
+            }
+            submit.disabled = true;
+            try {
+                const fd = new FormData(form);
+                const payload = {
+                    info: {
+                        buyerName: String(fd.get("buyerName") || ""),
+                        email: String(fd.get("email") || ""),
+                        phone: String(fd.get("phone") || ""),
+                        address: String(fd.get("address") || "")
+                    },
+                    list: cart.map(i => ({ productId: i.productId, quantity: i.quantity }))
+                };
+                const res = await fetch("http://localhost:8080/csp/createOrder", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify(payload)
+                });
+                const response = await res.json();
+                if (response.returnCode !== "0000"){
+                    alert("建立失敗:" + response.returnMsg)
+                }else{
+                    alert(response.returnMsg)
+                }
+                const { orderId } = response.data || {};
+                localStorage.setItem("orderId", orderId);
+                localStorage.setItem(CART_KEY, "[]");
+                result.style.display = "block";
+                result.innerHTML = `
+                    <div>訂單已建立！</div>
+                    <div>訂單編號：<strong>${orderId}</strong></div>
+                    <div style="margin-top:10px">
+                        <a class="btn" href="order.html?orderId=${encodeURIComponent(orderId)}">前往訂單頁</a>
+                    </div>`;
+                render();
+            } catch (err) {
+                alert(err.message || "下單失敗");
+            } finally {
+                submit.disabled = false;
+            }
         });
     </script>
 </body>

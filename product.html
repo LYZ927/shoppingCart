@@ -10,32 +10,32 @@
     .grid3 {
       display: grid;
       grid-template-columns: repeat(3, 1fr);
-      gap: 16px
+      gap: 16px;
     }
 
     @media (max-width: 900px) {
       .grid3 {
-        grid-template-columns: 1fr 1fr
+        grid-template-columns: 1fr 1fr;
       }
     }
 
     @media (max-width: 600px) {
       .grid3 {
-        grid-template-columns: 1fr
+        grid-template-columns: 1fr;
       }
     }
 
     .p-item {
       padding: 16px;
       border-radius: 12px;
-      background: #e5e5e5
+      background: #e5e5e5;
     }
 
     .thumb {
       height: 90px;
       border-radius: 10px;
       background: #ddd;
-      margin-bottom: 10px
+      margin-bottom: 10px;
     }
 
     .cart-line {
@@ -45,7 +45,7 @@
       padding: 10px 12px;
       background: #e9e9e9;
       border-radius: 10px;
-      margin-top: 10px
+      margin-top: 10px;
     }
   </style>
 </head>
@@ -54,25 +54,18 @@
   <div class="container">
     <!-- 頂部：TAB + 搜尋欄 -->
     <div class="header">
-      <div class="tabs">
-        <a class="tab" href="product.html">商品頁</a>
-      </div>
-      <div class="tabs">
-        <a class="tab" href="shoppingCart.html">購物車</a>
-      </div>
-      <div class="tabs">
-        <a class="tab" href="order.html">訂單頁</a>
-      </div>
+      <div class="tabs"><a class="tab" href="product.html">商品頁</a></div>
+      <div class="tabs"><a class="tab" href="shoppingCart.html">購物車</a></div>
+      <div class="tabs"><a class="tab" href="order.html">訂單頁</a></div>
       <div class="toolbar" style="min-width:420px">
         <input id="search" class="input" placeholder="搜尋欄">
+        <button id="searchBtn" class="btn" style="margin-left:8px">搜尋</button>
       </div>
     </div>
 
     <!-- 商品區 -->
     <div class="card" style="margin-top:12px">
-      <div class="grid3" id="productGrid">
-        <!-- 3xN 商品卡 -->
-      </div>
+      <div class="grid3" id="productGrid"></div>
     </div>
 
     <!-- 購物車區 -->
@@ -80,67 +73,126 @@
     <div class="card">
       <div id="cartList"></div>
       <div class="space-between" style="margin-top:12px">
-        <div class="muted">共 <span id="cartCount">0</span> 項 · 小計 <span class="price" id="cartTotal">NT$ 0</span></div>
+        <div class="muted">共
+          <span id="cartCount">0</span> 項 · 小計
+          <span class="price" id="cartTotal">NT$ 0</span>
+        </div>
         <a id="goCheckout" class="btn">去結帳</a>
       </div>
     </div>
   </div>
 
   <script>
-    // ===== Mock 產品資料 =====
-    // TODO: Call API (api/queryProducts)
-    const PRODUCTS = Array.from({ length: 9 }, (_, i) => ({
-      id: 1000 + i, name: `商品 ${i + 1}`, price: (i % 3 ? 299 : 1299), stock: (i % 4 ? 12 : 0), description: "示意描述"
-    }));
-    const $ = s => document.querySelector(s);
-    const grid = $("#productGrid"), search = $("#search");
-    const cartList = $("#cartList"), cartCount = $("#cartCount"), cartTotal = $("#cartTotal"), goCheckout = $("#goCheckout");
+    // DOM 綁訂
+    const grid = document.querySelector("#productGrid");
+    const search = document.querySelector("#search");
+    const searchBtn = document.querySelector("#searchBtn");
+    const cartList = document.querySelector("#cartList");
+    const cartCount = document.querySelector("#cartCount");
+    const cartTotal = document.querySelector("#cartTotal");
+    const goCheckout = document.querySelector("#goCheckout");
 
-    // 購物車存 localStorage（key: app_cart）
+    // 下方購物車（localStorage）
     const CART_KEY = "app_cart";
     const cart = loadCart();
 
     function loadCart() {
-      try {
-        return JSON.parse(localStorage.getItem(CART_KEY) || "[]");
-      } catch {
-        return [];
-      }
+      try { return JSON.parse(localStorage.getItem(CART_KEY) || "[]"); }
+      catch { return []; }
     }
-
     function saveCart() {
       localStorage.setItem(CART_KEY, JSON.stringify(cart));
       renderCart();
     }
 
-    function renderProducts(keyword = "") {
+    // 選染購物車資料
+    function renderCart() {
+      if (cart.length === 0) {
+        cartList.innerHTML = `<div class="muted">尚無商品</div>`;
+      } else {
+        cartList.innerHTML = cart.map(x => `
+          <div class="cart-line">
+            <div>${x.productName} × ${x.quantity}</div>
+            <div>NT$ ${(x.unitPrice * x.quantity).toLocaleString()}</div>
+          </div>
+        `).join("");
+      }
+      const total = cart.reduce((s, x) => s + x.unitPrice * x.quantity, 0);
+      cartCount.textContent = cart.length;
+      cartTotal.textContent = "NT$ " + total.toLocaleString();
+    }
+
+    // 查詢商品(queryProducts)
+    async function queryProducts(keyword = "") {
+      const body = { NAME: keyword };
+      const res = await fetch("http://localhost:8080/csp/queryProducts", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body)
+      });
+      const data = await res.json();
+
+      if (data.returnCode !== "0000") {
+        alert(data.returnCode + data.returnMsg);
+      }
+
+      // 後端欄位 → 前端欄位
+      return data.list.map(p => ({
+        id: Number(p.productId),
+        name: p.name ?? "",
+        price: Number(p.price ?? 0),
+        stock: Number(p.stock ?? 0),
+        description: p.description ?? "",
+        status: p.status ?? "Inactive",
+        createTime: p.createTime,
+        updateTime: p.updateTime
+      }));
+    }
+
+    // 渲染上方商品區
+    function renderProducts(items = []) {
       grid.innerHTML = "";
-      const items = PRODUCTS.filter(p => p.name.includes(keyword));
+      if (!items.length) {
+        grid.innerHTML = `<div class="muted" style="padding:12px">查無商品</div>`;
+        return;
+      }
+
       items.forEach(p => {
         const el = document.createElement("div");
         el.className = "p-item";
         el.innerHTML = `
-        <div class="thumb"></div>
-        <div class="row" style="justify-content:space-between">
-          <strong>${p.name}</strong>
-          <span class="price">NT$ ${p.price.toLocaleString()}</span>
-        </div>
-        <div class="row" style="justify-content:space-between">
-          ${p.description}
-        </div>
-        <div class="muted" style="margin:6px 0 10px">${p.stock ? `庫存 ${p.stock}` : `缺貨`}</div>
-        <div class="row">
-          <input class="input qty" type="number" min="1" max="99" value="1" style="width:90px">
-          <button class="btn">加入購物車</button>
-        </div>`;
+          <div class="thumb"></div>
+          <div class="row" style="justify-content:space-between">
+            <strong>${p.name}</strong>
+            <span class="price">NT$ ${p.price.toLocaleString()}</span>
+          </div>
+          <div class="row" style="justify-content:space-between">
+            ${p.description}
+          </div>
+          <div class="muted" style="margin:6px 0 10px">庫存 ${p.stock}</div>
+          <div class="row">
+            <input class="input qty" type="number" min="1" max="99" value="1" style="width:90px">
+            <button class="btn">加入購物車</button>
+          </div>
+        `;
+
         const qtyEl = el.querySelector(".qty");
-        el.querySelector(".btn").addEventListener("click", () => {
-          const qty = Math.max(1, Math.min(99, Number(qtyEl.value || 1)));
+        const btn = el.querySelector(".btn");
+
+        btn.addEventListener("click", () => {
+          const raw = Number(qtyEl.value || 1);
+          const qty = Math.max(1, Math.min(99, raw));
+
           const existed = cart.find(x => x.productId === p.id);
           if (existed) {
             existed.quantity = Math.min(99, existed.quantity + qty);
           } else {
-            cart.push({ productId: p.id, productName: p.name, unitPrice: p.price, quantity: qty });
+            cart.push({
+              productId: p.id,
+              productName: p.name,
+              unitPrice: p.price,
+              quantity: qty
+            });
           }
           saveCart();
         });
@@ -148,22 +200,18 @@
       });
     }
 
-    function renderCart() {
-      if (cart.length === 0) {
-        cartList.innerHTML = `<div class="muted">尚無商品</div>`;
-      } else {
-        cartList.innerHTML = cart.map(x => `
-        <div class="cart-line">
-          <div>${x.productName} × ${x.quantity}</div>
-          <div>NT$ ${(x.unitPrice * x.quantity).toLocaleString()}</div>
-        </div>`).join("");
-      }
-      const total = cart.reduce((s, x) => s + x.unitPrice * x.quantity, 0);
-      cartCount.textContent = cart.length;
-      cartTotal.textContent = "NT$ " + total.toLocaleString();
+    // ===== 搜尋（按鈕 / Enter 觸發）=====
+    async function doSearch() {
+      const keyword = search.value.trim();
+      const items = await queryProducts(keyword);
+      renderProducts(items);
     }
+    searchBtn.addEventListener("click", doSearch);
+    search.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") doSearch();
+    });
 
-    search.addEventListener("input", e => renderProducts(e.target.value.trim()));
+    // ===== 結帳 =====
     goCheckout.addEventListener("click", () => {
       if (cart.length === 0) {
         alert("購物車是空的");
@@ -172,8 +220,12 @@
       location.href = "shoppingCart.html";
     });
 
-    renderProducts();
-    renderCart();
+    // 初始化上方產品區
+    (async function init() {
+      renderCart();
+      const items = await queryProducts("");
+      renderProducts(items);
+    })();
   </script>
 </body>
 
