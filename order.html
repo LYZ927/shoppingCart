@@ -115,63 +115,43 @@
 
     // 從 LocalStorage 拿orderId
     const lsOrderId = localStorage.getItem("orderId");
-    if (lsOrderId){
+    if (lsOrderId) {
       orderIdInput.value = lsOrderId;
-    } 
+    }
 
     let currentOrder = null;
     let qtyDraft = new Map();
+    let isFirstLoad = true;
 
     // 點擊查詢
-    loadBtn.addEventListener("click", async() => {
-      const id = orderIdInput.value.trim();
-      const res = await apiQueryOrder(id);
-      if (res.returnCode !== "0000") { 
-        alert("查詢失敗：" + (res.returnMsg || "")); 
-        return; 
-      }else{
-        alert(res.returnMsg); 
-      }
-      currentOrder = res.data; 
-      qtyDraft.clear();
-      renderOrder(currentOrder);
-    });
+    loadBtn.addEventListener("click", () => loadOrder());
 
     // 點擊修改
-    saveBtn.addEventListener("click", async() => {
-       if (!currentOrder) return;
+    saveBtn.addEventListener("click", async () => {
+      if (!currentOrder) return;
       const items = currentOrder.list.map(it => {
         const newQty = qtyDraft.has(it.productId) ? qtyDraft.get(it.productId) : it.quantity;
         return { productId: it.productId, quantity: newQty };
       });
-      const j = await apiEditOrder(currentOrder.orderId, items);
-      if (j.returnCode !== "0000") {
-        alert("更新失敗：" + (j.returnMsg || ""));
-        return;
-      }
+      const res = await apiEditOrder(currentOrder.orderId, items);
+      alert(res.returnCode + ":" + res.returnMsg);
       qtyDraft.clear();
     });
 
     // 點擊完成
-    completeBtn.addEventListener("click", async() => {
+    completeBtn.addEventListener("click", async () => {
       if (!currentOrder) return;
       const res = await apiCompleteOrder(currentOrder.orderId);
-      if (res.returnCode !== "0000") {
-        alert("完成失敗：" + (res.returnMsg || ""));
-        return;
-      }
+      alert(res.returnCode + ":" + res.returnMsg);
     });
 
     // 點擊刪除
-    deleteBtn.addEventListener("click", async() => {
+    deleteBtn.addEventListener("click", async () => {
       if (!currentOrder) return;
       if (!confirm("確認刪除此訂單？")) return;
       const res = await apiDeleteOrder(currentOrder.orderId);
-      if (res.returnCode !== "0000") {
-        alert("刪除失敗：" + (res.returnMsg || "")); return;
-      }
-      alert("已刪除");
-      currentOrder = null;
+      alert(res.returnCode + ":" + res.returnMsg);
+      // currentOrder = null;
       itemsWrap.classList.add("hidden");
       infoEl.textContent = "已刪除";
     });
@@ -179,9 +159,9 @@
     // 點擊評論
     reviewForm.addEventListener("submit", async (e) => {
       e.preventDefault();
-      if (!currentOrder) { 
-        alert("請先查詢訂單"); 
-        return; 
+      if (!currentOrder) {
+        alert("請先查詢訂單");
+        return;
       }
       const fd = new FormData(reviewForm);
       const payload = {
@@ -195,6 +175,25 @@
 
     // 初次自動載入
     if (lsOrderId) loadOrder();
+
+    // 查詢訂單
+    async function loadOrder() {
+      const id = orderIdInput.value.trim();
+      const res = await apiQueryOrder(id);
+      if (res.returnCode !== "0000") {
+        alert(res.returnCode + ":" + res.returnMsg);
+        return;
+      } else {
+        if (isFirstLoad) {
+          isFirstLoad = false
+        } else {
+          alert(res.returnCode + ":" + res.returnMsg);
+        }
+      }
+      currentOrder = res.data;
+      qtyDraft.clear();
+      renderOrder(currentOrder)
+    }
 
 
     // ===== 後端 API =====
